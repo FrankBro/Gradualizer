@@ -3408,54 +3408,14 @@ refinable(_) ->
 no_guards({clause, _, _, Guards, _}) ->
     Guards == [].
 
-
--spec check_guard_bif(erlang:anno(), atom(), list()) -> map().
-check_guard_bif(P, is_atom, [{var, _, Var}]) -> #{Var => {type, P, atom, []}};
-check_guard_bif(P, is_binary, [{var, _, Var}]) -> #{Var => {type, P, binary, []}};
-check_guard_bif(P, is_bitstring, [{var, _, Var}]) -> #{Var => {type, P, bitstring, []}};
-check_guard_bif(P, is_boolean, [{var, _, Var}]) -> #{Var => {type, P, boolean, []}};
-check_guard_bif(P, is_float, [{var, _, Var}]) -> #{Var => {type, P, float, []}};
-check_guard_bif(P, is_integer, [{var, _, Var}]) -> #{Var => {type, P, integer, []}};
-check_guard_bif(P, is_number, [{var, _, Var}]) -> #{Var => {type, P, number, []}};
-check_guard_bif(P, is_list, [{var, _, Var}]) -> #{Var => {type, P, list, []}};
-check_guard_bif(P, is_map, [{var, _, Var}]) -> #{Var => {type, P, map, []}};
-check_guard_bif(P, is_pid, [{var, _, Var}]) -> #{Var => {type, P, pid, []}};
-check_guard_bif(P, is_port, [{var, _, Var}]) -> #{Var => {type, P, port, []}};
-check_guard_bif(P, is_reference, [{var, _, Var}]) -> #{Var => {type, P, reference, []}};
-check_guard_bif(P, is_tuple, [{var, _, Var}]) -> #{Var => {type, P, tuple, []}};
-check_guard_bif(P, is_function, [{var, _, Var}]) -> #{Var => {type, P, 'fun', []}};
-check_guard_bif(P, is_record, [{var, _, Var}, {atom, _, Record}]) ->
-    #{Var => {type, P, record, [{atom, P, Record}]}};
-check_guard_bif(_P, _Fun, _Vars) ->
-    #{}.
-
--spec check_guard_call(erlang:anno(), atom(), list()) -> map().
-check_guard_call(P, Name, Args) ->
-    Arity = length(Args),
-    case erl_internal:bif(Name, Arity) of
-        true -> check_guard_bif(P, Name, Args);
-        false -> #{}
-    end.
-
--spec check_guard(#env{}, term()) -> map().
-check_guard(_Env, {call, P, {atom, _, Fun}, Vars}) ->
-    check_guard_call(P, Fun, Vars);
-check_guard(_Env, {call, P, {remote,_,_,{atom, _, Fun}}, Vars}) ->
-    check_guard_call(P, Fun, Vars);
-check_guard(Env, {op, _OrElseAnno, 'orelse', Call1, Call2}) ->
-    union_var_binds([check_guard(Env, Call1), check_guard(Env, Call2)], Env#env.tenv);
-check_guard(Env, Guard) ->
-    {_Ty, VB, _Cs} = type_check_expr(Env, Guard), % Do we need to thread the Env?
-    VB.
-
 %% TODO: implement proper checking of guards.
--spec check_guards(#env{}, term()) -> map().
 check_guards(Env, Guards) ->
     union_var_binds(
       lists:map(fun (GuardSeq) ->
                         union_var_binds(
                           lists:map(fun (Guard) ->
-                              check_guard(Env, Guard)
+                                                {_Ty, VB, _Cs} = type_check_expr(Env, Guard), % Do we need to thread the Env?
+                                                VB
                                     end, GuardSeq), Env#env.tenv)
                 end, Guards), Env#env.tenv).
 
