@@ -3657,7 +3657,8 @@ add_type_pat({record, P, Record, Fields}, Ty, TEnv, VEnv) ->
         type_error -> throw({type_error, record_pattern, P, Record, Ty});
         {ok, Cs1} ->
             {VEnv2, Cs2} = add_type_pat_fields(Fields, Record, TEnv, VEnv),
-            {type(none), Ty, VEnv2, constraints:combine(Cs1, Cs2)}
+            RecTy = {type, P, record, [{atom, P, Record}]},
+            {type(none), RecTy, VEnv2, constraints:combine(Cs1, Cs2)}
     end;
 add_type_pat({map, _, _} = MapPat, {var, _, Var} = TyVar, _TEnv, VEnv) ->
     %% FIXME this is a quite rudimentary implementation
@@ -3721,6 +3722,13 @@ add_type_pat(Pat, {ann_type, _, [_, Ty]}, TEnv, VEnv) ->
 
 add_type_pat(Pat, Ty, _TEnv, _VEnv) ->
     throw({type_error, pattern, element(2, Pat), Pat, Ty}).
+
+add_type_pat_var(Pat, Var, PatVar, Ty, TEnv, VEnv) ->
+    %% Refine using Pat1 first to be able to bind Pat2 to a refined type.
+    {PatTy1, Ty1, VEnv1, Cs2} = add_type_pat(Pat, Ty, TEnv, VEnv),
+    {PatTy2, Ty2, VEnv2, Cs1} = add_type_pat(PatVar, Ty1, TEnv, VEnv1),
+    {GlbTy, Cs3} = glb(PatTy1, PatTy2, TEnv),
+    {GlbTy, Ty2, VEnv2, constraints:combine([Cs1, Cs2, Cs3])}.
 
 add_type_pat_literal(Pat, Ty, TEnv, VEnv) ->
     case erl_eval:partial_eval(Pat) of
