@@ -3648,14 +3648,10 @@ add_type_pat({map, _P, PatAssocs}, {type, _, map, MapTyAssocs} = MapTy, TEnv, VE
                     {VEnv, []},
                     PatAssocs),
     {type(none), MapTy, NewVEnv, constraints:combine(Css)};
-add_type_pat({match, _, Pat1, {var, _, Var}=Pat2}, Ty, TEnv, VEnv) ->
-    %% Refine using Pat1 first to be able to bind Pat2 to a refined type.
-    {PatTy1, Ty1, VEnv1, Cs2} = add_type_pat(Pat1, Ty, TEnv, VEnv),
-    {PatTy2, Ty2, VEnv2, Cs1} = add_type_pat(Pat2, Ty1, TEnv, VEnv1),
-    VEnv3 = case Pat1 of {record, P, Record, _} -> VEnv2#{Var => {type, P, record, [{atom, P, Record}]}};
-                         _ -> VEnv2 end,
-    {GlbTy, Cs3} = glb(PatTy1, PatTy2, TEnv),
-    {GlbTy, Ty2, VEnv3, constraints:combine([Cs1, Cs2, Cs3])};
+add_type_pat({match, _, {var, _, Var}=PatVar, Pat}, Ty, TEnv, VEnv) ->
+    add_type_pat_var(Pat, Var, PatVar, Ty, TEnv, VEnv);
+add_type_pat({match, _, Pat, {var, _, Var}=PatVar}, Ty, TEnv, VEnv) ->
+    add_type_pat_var(Pat, Var, PatVar, Ty, TEnv, VEnv);
 add_type_pat({match, _, Pat1, Pat2}, Ty, TEnv, VEnv) ->
     %% Use the refined type of Pat2 to bind vars in Pat1.
     {PatTy1, Ty1, VEnv1, Cs1} = add_type_pat(Pat2, Ty, TEnv, VEnv),
@@ -3683,6 +3679,16 @@ add_type_pat(Pat, {ann_type, _, [_, Ty]}, TEnv, VEnv) ->
 
 add_type_pat(Pat, Ty, _TEnv, _VEnv) ->
     throw({type_error, pattern, element(2, Pat), Pat, Ty}).
+
+
+add_type_pat_var(Pat, Var, PatVar, Ty, TEnv, VEnv) ->
+    %% Refine using Pat1 first to be able to bind Pat2 to a refined type.
+    {PatTy1, Ty1, VEnv1, Cs2} = add_type_pat(Pat, Ty, TEnv, VEnv),
+    {PatTy2, Ty2, VEnv2, Cs1} = add_type_pat(PatVar, Ty1, TEnv, VEnv1),
+    VEnv3 = case Pat of {record, P, Record, _} -> VEnv2#{Var => {type, P, record, [{atom, P, Record}]}};
+                _ -> VEnv2 end,
+    {GlbTy, Cs3} = glb(PatTy1, PatTy2, TEnv),
+    {GlbTy, Ty2, VEnv3, constraints:combine([Cs1, Cs2, Cs3])}.
 
 add_type_pat_literal(Pat, Ty, TEnv, VEnv) ->
     case erl_eval:partial_eval(Pat) of
