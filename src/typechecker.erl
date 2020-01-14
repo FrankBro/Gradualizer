@@ -3268,6 +3268,8 @@ check_clause(Env, ArgsTy, ResTy, C = {clause, P, Args, Guards, Block}) ->
             {VarBinds2, Cs2} = type_check_block_in(EnvNewest, ResTy, Block),
             RefinedTys  = refine_clause_arg_tys(ArgsTy, PatTys,
                                                 Guards, Env#env.tenv),
+            io:format(user, "DEBUG: ArgsTy = ~p~n", [ArgsTy]),
+            io:format(user, "DEBUG: RefinedTys = ~p~n", [RefinedTys]),
             {RefinedTys
             ,union_var_binds([VarBinds1, VarBinds2, VEnv2], Env#env.tenv)
             ,constraints:combine(Cs1, Cs2)};
@@ -3282,6 +3284,7 @@ check_clause(_Env, _ArgsTy, _ResTy, Term) ->
 %% Refine types by matching clause. MatchedTys are the types exhausted by
 %% each pattern in the previous clause.
 refine_clause_arg_tys(Tys, MatchedTys, [], TEnv) ->
+%%    Ty        = expand_arg(type(tuple, Tys)),
     Ty        = type(tuple, Tys),
     MatchedTy = type(tuple, MatchedTys),
     try refine(Ty, MatchedTy, TEnv) of
@@ -3289,13 +3292,19 @@ refine_clause_arg_tys(Tys, MatchedTys, [], TEnv) ->
             RefTys;
         ?type(none) ->
             lists:duplicate(length(Tys), type(none));
-        ?type(union, _) ->
+        ?type(union, UnionTys) = X ->
+            io:format(user, "DEBUG: UnionTys = ~p~n", [X]),
             Tys %% Multiple possibilities => don't refine
+%%        ?type(union, RefTys) ->
+            %% collapse back into arguments
+%%            collapse_args(Tys)
     catch
         no_refinement ->
             %% Imprecision prohibits refinement
+            io:format(user, "DEBUG: no_refinement~n", []),
             Tys;
         disjoint ->
+            io:format(user, "DEBUG: disjoint~n", []),
             %% This can currently happen due to unhandled type variables, e.g.
             %% Elem :: T \ {attribute, _TyVar-54982374928, compile, export_all}
             %% No refinement.
@@ -3303,6 +3312,28 @@ refine_clause_arg_tys(Tys, MatchedTys, [], TEnv) ->
     end;
 refine_clause_arg_tys(Tys, _TysBounds, _Guards, _TEnv) ->
     Tys.
+
+expand_arg(?type(union, Tys)) -> Tys;
+expand_arg(?type(tuple, Tys)) -> [expand_arg(Ty) || Ty <- Tys];
+expand_arg(Ty) -> Ty.
+
+collapse_args(?type(union, Tys)) -> [];
+collapse_args(Ty) -> Ty.
+
+permute([]) -> [[]];
+permute(L) -> zipper(L, [], []).
+
+% Use zipper to pick up first element of permutation
+zipper([], _, Acc) -> lists:reverse(Acc);
+zipper([H|T], R, Acc) ->
+    % place current member in front of all permutations
+    % of rest of set - both sides of zipper
+    prepend(H, permute(lists:reverse(R, T)),
+        % pass zipper state for continuation
+        T, [H|R], Acc).
+
+prepend(_, [], T, R, Acc) -> zipper(T, R, Acc); % continue in zipper
+prepend(X, [H|T], ZT, ZR, Acc) -> prepend(X, T, ZT, ZR, [[X|H]|Acc]).
 
 %% Normalize, refine, revert normalize if no refinement.
 %% May throw no_refinement.
@@ -3317,8 +3348,10 @@ refine(OrigTy, Ty, TEnv) ->
 refine_ty(_Ty, ?type(none), _TEnv) ->
     %% PatTy none() means the pattern can't be used for refinement,
     %% because there is imprecision.
+    io:format(user, "DEBUG: refine_ty none~n", []),
     throw(no_refinement);
 refine_ty(?type(T, A), ?type(T, A), _) ->
+    io:format(user, "DEBUG: refine_ty same~n", []),
     type(none);
 refine_ty(?type(union, UnionTys), Ty, TEnv) ->
     RefTys = lists:foldr(fun (UnionTy, Acc) ->
@@ -3332,6 +3365,7 @@ refine_ty(?type(union, UnionTys), Ty, TEnv) ->
     normalize(type(union, RefTys), TEnv);
 refine_ty(?type(tuple, Tys1), ?type(tuple, Tys2), TEnv)
   when length(Tys1) > 0, length(Tys1) == length(Tys2) ->
+    io:format(user, "DEBUG: refine_ty tuple~n", []),
     %% Non-empty tuple
     RefTys = [refine(Ty1, Ty2, TEnv) || {Ty1, Ty2} <- lists:zip(Tys1, Tys2)],
     %% {a|b, a|b} \ {a,a} => {b, a|b}, {a|b, b}
@@ -3339,21 +3373,27 @@ refine_ty(?type(tuple, Tys1), ?type(tuple, Tys2), TEnv)
     Tuples = [type(tuple, TupleElems) || TupleElems <- TuplesElems],
     normalize(type(union, Tuples), TEnv);
 refine_ty({ann_type, _, [_, Ty1]}, Ty2, TEnv) ->
+    io:format(user, "DEBUG: refine_ty ann_type left~n", []),
     refine_ty(Ty1, Ty2, TEnv);
 refine_ty(Ty1, {ann_type, _, [_, Ty2]}, TEnv) ->
+    io:format(user, "DEBUG: refine_ty ann_type right~n", []),
     refine_ty(Ty1, Ty2, TEnv);
 refine_ty({atom, _, A}, {atom, _, A}, _) ->
+    io:format(user, "DEBUG: refine_ty atom~n", []),
     type(none);
 refine_ty(?type(list, A), ?type(nil), _TEnv) ->
+    io:format(user, "DEBUG: refine_ty list~n", []),
     type(nonempty_list, A);
 refine_ty({Tag1, _, M}, {Tag2, _, N}, _TEnv)
     when Tag1 == integer orelse Tag1 == char,
          Tag2 == integer orelse Tag2 == char ->
+    io:format(user, "DEBUG: refine_ty integer or char~n", []),
     if M == N -> type(none);
        M /= N -> throw(disjoint)
     end;
 refine_ty(Ty, {Tag, _, V}, TEnv) when ?is_int_type(Ty),
                                       Tag == integer orelse Tag == char ->
+    io:format(user, "DEBUG: refine_ty integer or char one tag~n", []),
     case Ty of
         ?type(non_neg_integer) when V == 0 -> type(pos_integer);
         ?type(non_neg_integer) when V < 0  -> throw(disjoint);
@@ -3384,9 +3424,14 @@ refine_ty(Ty, {Tag, _, V}, TEnv) when ?is_int_type(Ty),
             throw(no_refinement)
     end;
 refine_ty(Ty1, Ty2, TEnv) ->
+    io:format(user, "DEBUG: refine_ty last~n", []),
     case glb(Ty1, Ty2, TEnv) of
-        {?type(none), _}  -> throw(disjoint);     %% disjoint
-        _NotDisjoint -> throw(no_refinement) %% imprecision
+        {?type(none), _}  ->
+            io:format(user, "DEBUG: refine_ty last throw disjoint~n", []),
+            throw(disjoint);     %% disjoint
+        _NotDisjoint ->
+            io:format(user, "DEBUG: refine_ty last throw no_refinement~n", []),
+            throw(no_refinement) %% imprecision
     end.
 
 %% Returns a nested list on the form
